@@ -1,19 +1,21 @@
 {
-  // VS Code Debug-Konfigurationen
+  // VS Code Debug Configurations
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug pdfreorder",        // Anzeigename im Debug-Menü
-      "type": "go",                      // Go-Debugger (Delve)
-      "request": "launch",               // Startet das Programm
-      "program": "${workspaceFolder}",   // Hauptpaket liegt im Projektordner
+      "name": "Debug pdfreorder",        // Display name in the debug menu
+      "type": "go",                      // Go debugger (Delve)
+      "request": "launch",               // Launches the program
+      "program": "${workspaceFolder}",   // Main package is in the project folder
       "args": [
-        "-in", "SWM-------------------------------_C51.pdf",            // Eingabedatei (Pfad anpassen!)
-        "-out", "ausgabe_duplex.pdf"     // Ausgabedatei
+        "-in", "SWM-------------------------------_C51.pdf",            // Input file (adjust path!)
+        "-out", "ausgabe_duplex.pdf",     // Output file
+        "-backdesc",  
+        "-rotateback"
       ],
-      "cwd": "${workspaceFolder}",       // Arbeitsverzeichnis
+      "cwd": "${workspaceFolder}",       // Working directory
       "env": {}
-      //"console": "integratedTerminal"    // Ausgabe im VS Code-Terminal
+      //"console": "integratedTerminal"    // Output in VS Code terminal
     }
   ]
 }

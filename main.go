@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -15,49 +16,51 @@ import (
 )
 
 func main() {
-	in := flag.String("in", "", "Eingabe-PDF")
-	out := flag.String("out", "reordered.pdf", "Ausgabe-PDF")
-	work := flag.String("work", "", "Arbeitsordner (optional, sonst temp)")
-	keepWork := flag.Bool("keep", false, "Arbeitsordner behalten (Debug)")
+	in := flag.String("in", "", "Input PDF")
+	out := flag.String("out", "reordered.pdf", "Output PDF")
+	work := flag.String("work", "", "Working directory (optional, default temp)")
+	keepWork := flag.Bool("keep", false, "Keep working directory (debug)")
+	backDesc := flag.Bool("backdesc", false, "Pair backs in descending order (e.g., N, N-2, ...) instead of ascending (S+1, S+2, ...)")
+	rotateBack := flag.Bool("rotateback", false, "Rotate all back-side pages by 180 degrees in the output PDF")
 	flag.Parse()
 
 	if *in == "" {
-		log.Fatal("Bitte -in <eingabe.pdf> angeben")
+		log.Fatal("Please provide -in <input.pdf>")
 	}
 	absIn, _ := filepath.Abs(*in)
 
-	// Arbeitsordner
+	// Working directory
 	workDir := *work
 	var err error
 	if workDir == "" {
 		workDir, err = os.MkdirTemp("", "pdfreorder_*")
 		if err != nil {
-			log.Fatalf("Temp-Ordner fehlgeschlagen: %v", err)
+			log.Fatalf("Creating temp directory failed: %v", err)
 		}
 		defer func() {
 			if !*keepWork {
 				os.RemoveAll(workDir)
 			} else {
-				log.Printf("Arbeitsordner behalten: %s", workDir)
+				log.Printf("Keeping working directory: %s", workDir)
 			}
 		}()
 	} else {
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
-			log.Fatalf("Arbeitsordner anlegen fehlgeschlagen: %v", err)
+			log.Fatalf("Failed to create working directory: %v", err)
 		}
 	}
 
 	conf := model.NewDefaultConfiguration()
 
-	// 1) In Einzelseiten aufspalten
+	// 1) Split input into single pages
 	if err := api.SplitFile(absIn, workDir, 1, conf); err != nil {
-		log.Fatalf("Split fehlgeschlagen: %v", err)
+		log.Fatalf("Split failed: %v", err)
 	}
 
-	// 2) Einzel-PDFs auflisten (werden i. d. R. als <name>_0001.pdf etc. benannt)
+	// 2) List single-page PDFs (usually named like <name>_0001.pdf etc.)
 	entries, err := os.ReadDir(workDir)
 	if err != nil {
-		log.Fatalf("ReadDir: %v", err)
+		log.Fatalf("ReadDir failed: %v", err)
 	}
 
 	type pageFile struct {
@@ -95,16 +98,16 @@ func main() {
 			}
 		}
 		if idx < 0 {
-			log.Printf("Warnung: Konnte Seitenzahl aus %q nicht extrahieren, ignoriere Datei.", name)
+			log.Printf("Warning: Could not extract page number from %q, skipping file.", name)
 			continue
 		}
 		pfiles = append(pfiles, pageFile{path: full, idx: idx})
 	}
 	if len(pfiles) == 0 {
-		log.Fatal("Keine Seiten nach Split gefunden.")
+		log.Fatal("No pages found after split.")
 	}
 
-	// numerisch sortieren
+	// sort numerically
 	sort.Slice(pfiles, func(i, j int) bool { return pfiles[i].idx < pfiles[j].idx })
 
 	pages := make([]string, len(pfiles))
@@ -113,19 +116,19 @@ func main() {
 	}
 	N := len(pages)
 
-	// Gerade Seitenzahl sicherstellen (für perfektes Muster)
+	// Ensure even number of pages for perfect pattern
 	if N%2 != 0 {
-		fmt.Printf("Warnung: PDF hat eine ungerade Seitenzahl (%d). ", N)
-		fmt.Println("Ich hänge eine leere Seite ans Ende an, damit die Anordnung aufgeht.")
+		fmt.Printf("Warning: PDF has an odd number of pages (%d). ", N)
+		fmt.Println("Adding a blank page at the end to maintain correct ordering.")
 
-		// Leerseite erzeugen: wir nehmen Seite 1 als Template und löschen deren Inhalt – einfacher:
-		// Workaround: pdfcpu kann leere Seite per CLI, im API ist’s umständlicher.
-		// Deshalb duplizieren wir die letzte Seite; für reine Listen ist das meist okay.
-		// (Alternativ: diese Stelle gegen eine echte Blank-Page-Erzeugung tauschen.)
+		// Create blank page: here we duplicate the last page as a simple workaround.
+		// Workaround: pdfcpu CLI can create blank page easily, API is more complex.
+		// So we duplicate the last page; usually fine for plain lists.
+		// (Alternatively replace with a true blank-page creation if desired.)
 		last := pages[len(pages)-1]
 		copyPath := filepath.Join(workDir, "ZZZ_blank_clone.pdf")
 		if err := copyFile(last, copyPath); err != nil {
-			log.Fatalf("Konnte Dummy-Seite nicht erstellen: %v", err)
+			log.Fatalf("Could not create dummy page: %v", err)
 		}
 		pages = append(pages, copyPath)
 		N++
@@ -135,25 +138,45 @@ func main() {
 	var order []string
 	order = make([]string, 0, N)
 	for i := 0; i < S; i++ {
-		// front i+1
+		// front side i+1
 		order = append(order, pages[i])
-		// back S+i+1
-		order = append(order, pages[S+i])
+		// back side
+		if *backDesc {
+			b := N - 1 - 2*i
+			if b >= 0 && b < N {
+				order = append(order, pages[b])
+			}
+		} else {
+			order = append(order, pages[S+i])
+		}
 	}
 
-	// Debug: Ausgabe der Blatt-Zuordnung
+	// Debug: print sheet mapping
 	for i := 0; i < S; i++ {
-		fmt.Printf("Blatt %2d: Vorderseite=Seite %d, Rückseite=Seite %d\n", i+1, i+1, S+i+1)
+		if *backDesc {
+			fmt.Printf("Sheet %2d: Front=Page %d, Back=Page %d (descending)\n", i+1, i+1, N-2*i)
+		} else {
+			fmt.Printf("Sheet %2d: Front=Page %d, Back=Page %d (ascending)\n", i+1, i+1, S+i+1)
+		}
 	}
 
-	// 3) Neu zusammenführen in gewünschter Reihenfolge
+	// 3) Merge pages in desired order
 	if err := api.MergeCreateFile(order, *out, false, conf); err != nil {
-		log.Fatalf("Merge fehlgeschlagen: %v", err)
+		log.Fatalf("Merge failed: %v", err)
 	}
-	fmt.Printf("Fertig: %s\n", *out)
+	if *rotateBack {
+		selectedPages := []string{}
+		for i := 2; i <= len(order); i += 2 {
+			selectedPages = append(selectedPages, strconv.Itoa(i))
+		}
+		if err := api.RotateFile(*out, *out, 180, selectedPages, conf); err != nil {
+			log.Fatalf("Rotate failed: %v", err)
+		}
+	}
+	fmt.Printf("Done: %s\n", *out)
 }
 
-// einfacher Copy helper
+// simple copy helper
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
