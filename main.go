@@ -142,7 +142,7 @@ func main() {
 		order = append(order, pages[i])
 		// back side
 		if *backDesc {
-			b := N - 1 - 2*i
+			b := N - 1 - i
 			if b >= 0 && b < N {
 				order = append(order, pages[b])
 			}
@@ -154,7 +154,7 @@ func main() {
 	// Debug: print sheet mapping
 	for i := 0; i < S; i++ {
 		if *backDesc {
-			fmt.Printf("Sheet %2d: Front=Page %d, Back=Page %d (descending)\n", i+1, i+1, N-2*i)
+			fmt.Printf("Sheet %2d: Front=Page %d, Back=Page %d (descending)\n", i+1, i+1, N-i)
 		} else {
 			fmt.Printf("Sheet %2d: Front=Page %d, Back=Page %d (ascending)\n", i+1, i+1, S+i+1)
 		}
